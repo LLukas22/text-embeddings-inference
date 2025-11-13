@@ -120,6 +120,17 @@ struct Args {
     #[clap(long, env)]
     dense_path: Option<String>,
 
+    /// Specify a custom ONNX file path to use instead of the default model files.
+    /// This is especially useful for loading quantized ONNX variants or alternative model versions.
+    ///
+    /// When provided, the server will use this ONNX file instead of the default `model.onnx`
+    /// (or `onnx/model.onnx`) found in the model repository.
+    ///
+    /// If not specified, the server will automatically load the standard ONNX model files
+    /// from the model repository.
+    #[clap(long, env)]
+    onnx_path: Option<String>,
+
     /// [DEPRECATED IN FAVOR OF `--hf-token`] Your Hugging Face Hub token
     #[clap(long, env, hide = true)]
     #[redact(partial)]
@@ -237,6 +248,7 @@ async fn main() -> Result<()> {
         args.default_prompt,
         args.default_prompt_name,
         args.dense_path,
+        args.onnx_path,
         token,
         Some(args.hostname),
         args.port,

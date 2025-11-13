@@ -87,6 +87,7 @@ impl Backend {
         dtype: DType,
         model_type: ModelType,
         dense_path: Option<String>,
+        onnx_path: Option<String>,
         uds_path: String,
         otlp_endpoint: Option<String>,
         otlp_service_name: String,
@@ -99,6 +100,7 @@ impl Backend {
             dtype,
             model_type.clone(),
             dense_path,
+            onnx_path,
             uds_path,
             otlp_endpoint,
             otlp_service_name,
@@ -359,6 +361,7 @@ async fn init_backend(
     dtype: DType,
     model_type: ModelType,
     dense_path: Option<String>,
+    onnx_path: Option<String>,
     uds_path: String,
     otlp_endpoint: Option<String>,
     otlp_service_name: String,
@@ -370,7 +373,7 @@ async fn init_backend(
         {
             if let Some(api_repo) = api_repo.as_ref() {
                 let start = std::time::Instant::now();
-                let model_files = download_onnx(api_repo)
+                let model_files = download_onnx(api_repo, onnx_path)
                     .await
                     .map_err(|err| BackendError::WeightsNotFound(err.to_string()))?;
                 match model_files.is_empty() {
@@ -621,33 +624,59 @@ async fn download_safetensors(api: &ApiRepo) -> Result<Vec<PathBuf>, ApiError> {
 }
 
 #[cfg(feature = "ort")]
-async fn download_onnx(api: &ApiRepo) -> Result<Vec<PathBuf>, ApiError> {
+async fn download_onnx(api: &ApiRepo, onnx_path: Option<String>) -> Result<Vec<PathBuf>, ApiError> {
     let mut model_files: Vec<PathBuf> = Vec::new();
 
-    tracing::info!("Downloading `model.onnx`");
-    match api.get("model.onnx").await {
-        Ok(p) => model_files.push(p),
-        Err(err) => {
-            tracing::warn!("Could not download `model.onnx`: {err}");
-            tracing::info!("Downloading `onnx/model.onnx`");
+    if let Some(onnx_path) = onnx_path.as_ref() {
+        // Only try this path if a custom one is provided
+        tracing::info!("Downloading ONNX files from specified path `{}`", onnx_path);
 
-            match api.get("onnx/model.onnx").await {
-                Ok(p) => model_files.push(p.parent().unwrap().to_path_buf()),
-                Err(err) => tracing::warn!("Could not download `onnx/model.onnx`: {err}"),
-            };
-        }
-    };
+        match api.get(onnx_path).await {
+            Ok(p) => model_files.push(p),
+            Err(err) => {
+                tracing::warn!("Could not download `{onnx_path}`: {err}");
+                // If we failed to download the main onnx file, return empty vec
+                return Ok(model_files);
+            }
+        };
 
-    tracing::info!("Downloading `model.onnx_data`");
-    match api.get("model.onnx_data").await {
-        Ok(p) => model_files.push(p),
-        Err(err) => {
-            tracing::warn!("Could not download `model.onnx_data`: {err}");
-            tracing::info!("Downloading `onnx/model.onnx_data`");
+        // If we succeded to load the main onnx file, try to load the onnx_data file too
+        let onnx_data_file = format!("{}_data", onnx_path);
+        tracing::info!("Downloading ONNX data file from path `{}`", onnx_data_file);
 
-            match api.get("onnx/model.onnx_data").await {
-                Ok(p) => model_files.push(p.parent().unwrap().to_path_buf()),
-                Err(err) => tracing::warn!("Could not download `onnx/model.onnx_data`: {err}"),
+        match api.get(&onnx_data_file).await {
+            Ok(p) => model_files.push(p),
+            Err(err) => {
+                tracing::warn!("Could not download `{onnx_data_file}`: {err}");
+            }
+        };
+    } else {
+        // Try default paths
+        tracing::info!("Downloading `model.onnx`");
+        match api.get("model.onnx").await {
+            Ok(p) => model_files.push(p),
+            Err(err) => {
+                tracing::warn!("Could not download `model.onnx`: {err}");
+                tracing::info!("Downloading `onnx/model.onnx`");
+
+                match api.get("onnx/model.onnx").await {
+                    Ok(p) => model_files.push(p.parent().unwrap().to_path_buf()),
+                    Err(err) => tracing::warn!("Could not download `onnx/model.onnx`: {err}"),
+                };
+            }
+        };
+
+        tracing::info!("Downloading `model.onnx_data`");
+        match api.get("model.onnx_data").await {
+            Ok(p) => model_files.push(p),
+            Err(err) => {
+                tracing::warn!("Could not download `model.onnx_data`: {err}");
+                tracing::info!("Downloading `onnx/model.onnx_data`");
+
+                match api.get("onnx/model.onnx_data").await {
+                    Ok(p) => model_files.push(p.parent().unwrap().to_path_buf()),
+                    Err(err) => tracing::warn!("Could not download `onnx/model.onnx_data`: {err}"),
+                }
             }
         }
     }
